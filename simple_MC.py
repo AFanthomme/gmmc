@@ -5,28 +5,28 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar as minimize
 
 
-params = {'n_spins': 40,
+params = {'n_spins': 100,
         'alpha': 2.,
         'gamma': 0.3,
         'beta': None,
-        't_max': 50000,
+        't_max': 10000,
         }
 
 if params['beta'] is None:
-    params['beta'] = 100 * params['n_spins'] ** 2
+    params['beta'] = params['n_spins'] ** 2
 
 
 def free_energy(N, spectrum, mu, gamma):
     # Basic free energy
-    return .5 * (mu / np.sqrt(gamma) - np.mean(np.log(mu-spectrum)))
+    return .5 * (mu / np.sqrt(gamma) - tch.log(mu-spectrum).mean().item())
 
 
 def compute_energy(J, params):
     N = params['n_spins']
     alpha, gamma = params['alpha'], params['gamma']
-    spectrum, _ = np.linalg.eig(J)
-    energy = 0.25 * np.mean(spectrum**2)
-    mu = minimize(lambda m: free_energy(N, spectrum, m,  gamma), bounds=(np.max(spectrum), 15), method='bounded').x
+    spectrum, _ = tch.symeig(J)
+    energy = 0.25 * (spectrum**2).mean()
+    mu = minimize(lambda m: free_energy(N, spectrum, m,  gamma), bounds=(spectrum.max().item(), 15), method='bounded').x
     return energy + alpha * free_energy(N, spectrum, mu,  gamma)
 
 
@@ -37,9 +37,9 @@ def run_monte_carlo(params):
     beta = params['beta']
 
     # Initialization for J (sym, gaussian and right norm)
-    J = np.random.normal(scale=1./np.sqrt(N), size=(N,N))
-    J = (J + J.T) / np.sqrt(2)
-    J -= np.diag(np.diag(J))
+    J = tch.normal(tch.zeros([N,N], dtype=tch.float32), 1./np.sqrt(N))
+    J = (J + J.t()) / np.sqrt(2)
+    J -= tch.diag(tch.diag(J))
 
     # Initialize the accumulators
     energy_acc = np.zeros(t_max)
@@ -54,7 +54,7 @@ def run_monte_carlo(params):
         i, j = np.random.randint(N, size=2)
         epsilon = np.random.normal(scale=1./np.sqrt(N))
 
-        J_prop = np.copy(J)
+        J_prop = J.clone()
         J_prop[i, j] += epsilon
         J_prop[j, i] += epsilon
 
@@ -64,11 +64,11 @@ def run_monte_carlo(params):
 
         if delta_F < 0:
             energy_acc[t] = F_prop
-            J = np.copy(J_prop)
+            J = J_prop.clone()
             move_acc[t] = 1
         elif np.random.rand() < np.exp(-beta*delta_F):
             energy_acc[t] = F_prop
-            J = np.copy(J_prop)
+            J = J_prop.clone()
             move_acc[t] = 1
             thermal_move_acc[t] = 1
         else:
