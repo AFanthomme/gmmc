@@ -1,7 +1,7 @@
 import tqdm
 import numpy as np
 import torch as tch
-from gaussian_model import CenteredGM
+from gaussian_model import CenteredGM, generate_pd_matrix
 
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar as minimize
@@ -11,56 +11,74 @@ from itertools import repeat
 
 params = {
         # Simulation parameters
-        'n_spins': 100,
+        'n_neurons': 50,
         'alpha': 2.,
-        'gamma': 0.3,
+        'gamma': 100000,
         'beta': None,
-        't_max': 50000,
-        'n_seeds': 15,
+        't_max': 5000,
+        'n_seeds': 5,
+        'n_samples': 10000,
 
 
         # Multi-threading params
-        'n_threads': 12,
+        'n_threads': 5,
         'silent': False
         }
 
 if params['beta'] is None:
-    params['beta'] = 15 * params['n_spins'] ** 2
+    params['beta'] = 0.0001 * params['n_neurons'] ** (-2)
 
 
-def free_energy(N, spectrum, mu, gamma):
-    # Basic free energy
-    return .5 * (mu / np.sqrt(gamma) - tch.log(mu-spectrum).mean().item())
+# def free_energy(N, spectrum, mu, gamma):
+#     # Basic free energy
+#     return .5 * (mu / np.sqrt(gamma) - tch.log(mu-spectrum).mean().item())
 
 
-def compute_energy(J, params):
-    N = params['n_spins']
-    alpha, gamma = params['alpha'], params['gamma']
-    spectrum, _ = tch.symeig(J)
-    energy = 0.25 * (spectrum**2).mean()
-    mu = minimize(lambda m: free_energy(N, spectrum, m,  gamma), bounds=(spectrum.max().item(), 15), method='bounded').x
-    return energy + alpha * free_energy(N, spectrum, mu,  gamma)
+def compute_energy(J, C, params):
+    N = params['n_neurons']
+    p = params['n_samples']
+    gamma = params['gamma']
+    beta = params['beta']
+
+    # For energy, eigenvectors are useless
+    spectrum, _ = tch.symeig(J, eigenvectors=True)
+    # print('new loop')
+    # print(spectrum.cpu().numpy())
+    # print(type(spectrum))
+    # print(len(spectrum))
 
 
-def run_one_thread(params, seed):
+    # why 0.25 and not 0.5?
+    # Understand all relevant scalings
+    l2_penalty = 0.25 * (spectrum**2).mean()
+    # print(tch.log(spectrum))
+    likelihood_energy = 0.5 * (p / N) * (tch.trace(J*C) + tch.log(spectrum).sum())
+    # print(tch.trace(J*C), 'trace term')
+    # print(tch.log(spectrum).mean(), 'log term')
+
+    # print(l2_penalty * gamma * beta, beta * likelihood_energy)
+
+    return beta * (l2_penalty * gamma + likelihood_energy)
+
+
+def run_one_thread(C, params, seed):
     # Make experiments different
     np.random.seed(seed)
     # Parameters unpacking
-    N = params['n_spins']
+    N = params['n_neurons']
     t_max = params['t_max']
     beta = params['beta']
 
-    # Initialization for J (sym, gaussian and right norm)
-    J = tch.normal(tch.zeros([N,N], dtype=tch.float32), 1./np.sqrt(N))
-    J = (J + J.t()) / np.sqrt(2)
-    J -= tch.diag(tch.diag(J))
+    # Initialization for J (sym, gaussian)
+    J = tch.from_numpy(generate_pd_matrix(N))
 
     # Initialize the accumulators
     energy_acc = np.zeros(t_max)
     move_acc = np.zeros(t_max)
     thermal_move_acc = np.zeros(t_max)
+    eigenvalues_acc = np.zeros((t_max, N))
 
-    energy_acc[0] = compute_energy(J, params)
+    energy_acc[0] = compute_energy(J, C, params)
 
     # MC loop
     for t in tqdm.tqdm(range(1, t_max)):
@@ -72,7 +90,11 @@ def run_one_thread(params, seed):
         J_prop[i, j] += epsilon
         J_prop[j, i] += epsilon
 
-        F_prop = compute_energy(J_prop, params)
+        F_prop = compute_energy(J_prop, C, params)
+
+        if np.isnan(F_prop):
+            print("Invalid move")
+            continue
 
         delta_F = F_prop - energy_acc[t-1]
 
@@ -103,8 +125,14 @@ def run_one_thread(params, seed):
     return energy_acc, move_acc
 
 def run_multi_threaded(params):
+    model_to_fit = CenteredGM(params['n_neurons'])
+    C_emp = tch.from_numpy(model_to_fit.get_empirical_C(n_samples=params['n_samples']))
     pool = ThreadPool(params['n_threads'])
-    results = pool.starmap(run_one_thread, zip([params for _ in range(params['n_seeds'])], range(params['n_seeds'])))
+    results = pool.starmap(run_one_thread, zip(
+            [C_emp for _ in range(params['n_seeds'])],
+            [params for _ in range(params['n_seeds'])],
+            range(params['n_seeds']))
+            )
     energies = np.array([tup[0] for tup in results])
 
     plt.figure()
