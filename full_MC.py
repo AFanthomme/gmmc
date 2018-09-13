@@ -13,20 +13,19 @@ params = {
         # Simulation parameters
         'n_neurons': 50,
         'alpha': 2.,
-        'gamma': 100000,
-        'beta': None,
-        't_max': 5000,
-        'n_seeds': 5,
-        'n_samples': 10000,
-
+        'gamma': 1,
+        'beta_normalized': 1.,
+        't_max': 40000,
+        'n_seeds': 10,
 
         # Multi-threading params
-        'n_threads': 5,
+        'n_threads': 10,
         'silent': False
         }
 
-if params['beta'] is None:
-    params['beta'] = 0.0001 * params['n_neurons'] ** (-2)
+# Setting secondary parameters values
+params['n_samples'] = int(params['alpha'] * params['n_neurons'])
+params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
 
 # def free_energy(N, spectrum, mu, gamma):
@@ -39,26 +38,24 @@ def compute_energy(J, C, params):
     p = params['n_samples']
     gamma = params['gamma']
     beta = params['beta']
+    alpha = params['alpha']
 
-    # For energy, eigenvectors are useless
+    # J is the off-diagonal part
     spectrum, _ = tch.symeig(J, eigenvectors=True)
-    # print('new loop')
-    # print(spectrum.cpu().numpy())
-    # print(type(spectrum))
-    # print(len(spectrum))
+
+    # THE N² scaling will come from beta, so here everything should be order 1
+    # Penalty part is straightforward
+    l2_penalty = gamma * 0.25 * (spectrum**2).mean()
+
+    # Likelihood part requires some calculations because of the spherical constraint:
+    def surrogate(mu):
+        return  mu - tch.log(mu-spectrum).mean().item()
+
+    mu_opt = minimize(surrogate, bounds=(spectrum.max().item(), 15), method='bounded').x
 
 
-    # why 0.25 and not 0.5?
-    # Understand all relevant scalings
-    l2_penalty = 0.25 * (spectrum**2).mean()
-    # print(tch.log(spectrum))
-    likelihood_energy = 0.5 * (p / N) * (tch.trace(J*C) + tch.log(spectrum).sum())
-    # print(tch.trace(J*C), 'trace term')
-    # print(tch.log(spectrum).mean(), 'log term')
-
-    # print(l2_penalty * gamma * beta, beta * likelihood_energy)
-
-    return beta * (l2_penalty * gamma + likelihood_energy)
+    likelihood_energy = 0.5 * alpha * (tch.trace(tch.mm(J,C)) / N + surrogate(mu_opt))
+    return l2_penalty + likelihood_energy
 
 
 def run_one_thread(C, params, seed):
@@ -69,8 +66,10 @@ def run_one_thread(C, params, seed):
     t_max = params['t_max']
     beta = params['beta']
 
-    # Initialization for J (sym, gaussian)
-    J = tch.from_numpy(generate_pd_matrix(N))
+    # Initialization for J (sym, gaussian, zero trace)
+    J = tch.normal(tch.zeros([N,N], dtype=tch.float32), 1./np.sqrt(N))
+    J = (J + J.t()) / np.sqrt(2)
+    J -= tch.diag(tch.diag(J))
 
     # Initialize the accumulators
     energy_acc = np.zeros(t_max)
@@ -97,6 +96,7 @@ def run_one_thread(C, params, seed):
             continue
 
         delta_F = F_prop - energy_acc[t-1]
+        # print(-beta*delta_F)
 
         if delta_F < 0:
             energy_acc[t] = F_prop
@@ -126,7 +126,7 @@ def run_one_thread(C, params, seed):
 
 def run_multi_threaded(params):
     model_to_fit = CenteredGM(params['n_neurons'])
-    C_emp = tch.from_numpy(model_to_fit.get_empirical_C(n_samples=params['n_samples']))
+    C_emp = tch.from_numpy(model_to_fit.get_empirical_C(n_samples=params['n_samples']).astype(np.float32))
     pool = ThreadPool(params['n_threads'])
     results = pool.starmap(run_one_thread, zip(
             [C_emp for _ in range(params['n_seeds'])],
