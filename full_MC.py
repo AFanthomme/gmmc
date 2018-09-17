@@ -8,6 +8,16 @@ from scipy.optimize import minimize_scalar as minimize
 from multiprocessing import Pool as ThreadPool
 from itertools import repeat
 
+import hashlib
+import json
+import os
+
+def get_id_for_dict(in_dict):
+    # forget n_seeds and n_threads, they should not impact the name of exp
+    # In particular, raises error if relaunching why changing only n_threads
+    dict_filtered = { key: in_dict[key] for key in in_dict.keys() if key not in ['n_threads', 'n_seeds']}
+    print(dict_filtered)
+    return hashlib.sha256(json.dumps(dict_filtered, sort_keys=True).encode('utf-8')).hexdigest()[:16]
 
 params = {
         # Simulation parameters
@@ -15,8 +25,11 @@ params = {
         'alpha': 3.,
         'gamma': 1,
         'beta_normalized': 1.,
-        't_max': 400000,
+        't_max': 500,
         'n_seeds': 12,
+
+        # method used to select reference C
+        'which_C': 'random',
 
         # Multi-threading params
         'n_threads': 12,
@@ -55,8 +68,14 @@ def compute_energy(J, C, params):
     return l2_penalty + likelihood_energy, mu_opt - spectrum
 
 
-def run_one_thread(C, params, seed):
+def run_one_thread(out_dir, C, params, seed):
     # Make experiments different
+    out_dir += 'seed_{}/'.format(seed)
+
+    # If this fails, the whole exp should fail
+    os.makedirs(out_dir)
+
+
     np.random.seed(seed)
     # Parameters unpacking
     N = params['n_neurons']
@@ -124,34 +143,40 @@ def run_one_thread(C, params, seed):
             energy_acc[t] = energy_acc[t-1]
             eigenvalues_acc[t] = eigenvalues_acc[t-1]
 
-    if not params['silent']:
-        plt.figure()
-        plt.plot(np.cumsum(move_acc), label='Energy moves')
-        plt.plot(np.cumsum(thermal_move_acc), label='Entropy moves')
-        plt.plot(np.cumsum(thermal_move_acc + move_acc), label='Total moves')
-        plt.legend()
-        plt.savefig('out/moves_thread_{}.pdf'.format(seed))
-
-        plt.figure()
-        plt.plot(energy_acc)
-        plt.savefig('out/energy_thread_{}.pdf'.format(seed))
-
-        # Not very informative...
-        # plt.figure()
-        # plt.plot(eigenvalues_acc)
-        # plt.savefig('out/eeigenvalues_thread_{}.pdf'.format(seed))
+    np.save(out_dir+'energy_acc', energy_acc)
+    np.save(out_dir+'eigenvalues_acc', eigenvalues_acc)
 
     return energy_acc, move_acc, eigenvalues_acc
 
 def run_multi_threaded(params):
+    # Determine the hash for that particular experiment
+    hash = get_id_for_dict(params)
+    out_dir = 'out/raw/{}'.format(hash)
+
+    # Just in case two params gave exactly the same hash
+    try:
+        os.makedirs(out_dir)
+        out_dir += '/'
+    except FileExistsError:
+        out_dir += '_dup'
+        os.makedirs(out_dir)
+        out_dir += '/'
+
+    with open(out_dir + 'params', 'w') as outfile:
+        json.dump(params, outfile)
+
+
     model_to_fit = CenteredGM(params['n_neurons'])
     C_emp = tch.from_numpy(model_to_fit.get_empirical_C(n_samples=params['n_samples']).astype(np.float32))
     pool = ThreadPool(params['n_threads'])
+
     results = pool.starmap(run_one_thread, zip(
+            [out_dir for _ in range(params['n_seeds'])],
             [C_emp for _ in range(params['n_seeds'])],
             [params for _ in range(params['n_seeds'])],
             range(params['n_seeds']))
             )
+
 
 
     energies = np.array([tup[0] for tup in results])
@@ -160,11 +185,11 @@ def run_multi_threaded(params):
     # Switch to a (t_max, N, n_seeds) shape
     eigenvalues = eigenvalues.transpose(1, 2, 0)
 
-    np.save('out/energies', energies)
-    np.save('out/eigenvalues', eigenvalues)
+    np.save(out_dir + 'energies', energies)
+    np.save(out_dir + 'eigenvalues', eigenvalues)
 
-    from analysis import do_analysis
-    do_analysis()
+    # from analysis import do_analysis
+    # do_analysis()
 
 
 
