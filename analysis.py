@@ -20,18 +20,22 @@ def update_database():
         dict_of_dicts[hash] = params
 
     database = pd.DataFrame.from_dict(dict_of_dicts)
-    print(database)
     database.to_pickle('out/raw/parameters_database.pkl')
 
 
 
-def do_analysis():
-    energies, eigenvalues = np.load('out/energies.npy'), np.load('out/eigenvalues.npy')
-    print("Data loaded")
+
+def parse_individual_subfolder(subfolder):
+    # Automated part of the analysis
+    # More challenging analysis should be done somewhere else
+
+    # If we keep adding more points, need to reduce before doing the figure
+    energies, eigenvalues = np.load(subfolder + '/energies.npy'), np.load(subfolder + '/eigenvalues.npy')
+    print("Data loaded for subfolder {}".format(subfolder))
 
     plt.figure()
     plt.errorbar(range(energies.shape[1]), np.mean(energies, axis=0), yerr=np.std(energies, axis=0))
-    plt.savefig('out/energy_averaged.pdf')
+    plt.savefig(subfolder + '/energy_averaged.png')
 
 
 
@@ -39,7 +43,7 @@ def do_analysis():
     mean_of_evs = eigenvalues.mean(axis=1)
     plt.figure()
     plt.errorbar(range(eigenvalues.shape[0]), np.mean(mean_of_evs, axis=1), yerr=np.std(mean_of_evs, axis=1))
-    plt.savefig('out/mean_eigenvalue_averaged.pdf')
+    plt.savefig(subfolder + '/mean_eigenvalue_averaged.png')
 
     # Make a "diffusion map" for the eigenvalues
     # First, mix the eigenvalues from all seeds :
@@ -56,8 +60,16 @@ def do_analysis():
 
     plt.figure()
     plt.imshow(diff_map.T, extent=[0, diff_map.shape[0], bounds[0], bounds[1]], aspect='auto')
-    plt.savefig('out/eigenvalues_diffmap.pdf')
+    plt.savefig(subfolder + '/eigenvalues_diffmap.png')
+
+    plt.close()
+
+def post_run_parsing():
+    update_database()
+    exp_dirs = get_immediate_subdirectories('out/raw')
+    for exp_dir in exp_dirs:
+        parse_individual_subfolder('out/raw/' + exp_dir)
 
 if __name__ == '__main__':
-    update_database()
+    post_run_parsing()
     # do_analysis()

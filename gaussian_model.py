@@ -3,10 +3,17 @@ import numpy as np
 def generate_pd_matrix(dim):
     sigma = np.random.normal(np.zeros([dim,dim], dtype=np.float32), 1./np.sqrt(dim))
     sigma = (sigma + sigma.T) / np.sqrt(2)
-    sigma -= np.diag(np.diag(sigma))
+    return sigma
 
+def normalize(sigma):
+    dim = sigma.shape[0]
     # Impose PD and mean of eigenvalues equal 1
+
+    # Forces all diagonal elements to be the same
+    # That's the easiest way to ensure all ev > 0...
+    sigma -= np.diag(np.diag(sigma))
     sigma += np.diag([dim for _ in range(dim)])
+
     sigma *= dim / np.sum(np.linalg.eig(sigma)[0])
     assert np.all(np.linalg.eig(sigma)[0] > 0.)
     assert np.abs(np.sum(np.linalg.eig(sigma)[0]) - dim) < 0.05
@@ -19,7 +26,7 @@ class CenteredGM:
         if sigma is not None:
             self.sigma = sigma
         else:
-            self.sigma = generate_pd_matrix(self.dim)
+            self.sigma = normalize(generate_pd_matrix(self.dim))
 
         # Sanity checks before model build
         # print(np.linalg.eig(self.sigma)[0])

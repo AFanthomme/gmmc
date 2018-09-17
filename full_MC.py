@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar as minimize
 from multiprocessing import Pool as ThreadPool
 from itertools import repeat
+from analysis import post_run_parsing
 
 import hashlib
 import json
@@ -16,7 +17,6 @@ def get_id_for_dict(in_dict):
     # forget n_seeds and n_threads, they should not impact the name of exp
     # In particular, raises error if relaunching why changing only n_threads
     dict_filtered = { key: in_dict[key] for key in in_dict.keys() if key not in ['n_threads', 'n_seeds']}
-    print(dict_filtered)
     return hashlib.sha256(json.dumps(dict_filtered, sort_keys=True).encode('utf-8')).hexdigest()[:16]
 
 params = {
@@ -25,15 +25,16 @@ params = {
         'alpha': 3.,
         'gamma': 1,
         'beta_normalized': 1.,
-        't_max': 500,
-        'n_seeds': 12,
+        't_max': 400000,
+        'n_seeds': 8,
 
         # method used to select reference C
         'which_C': 'random',
 
-        # Multi-threading params
-        'n_threads': 12,
-        'silent': False
+        # Multi-threading and IO params
+        'n_threads': 8,
+        'silent': False,
+        'save_every': 5000,
         }
 
 # Setting secondary parameters values
@@ -81,6 +82,7 @@ def run_one_thread(out_dir, C, params, seed):
     N = params['n_neurons']
     t_max = params['t_max']
     beta = params['beta']
+    save_every = params['save_every']
 
     # Initialization for J (sym, gaussian, zero diag, sum or eigenvalues equal to N)
     J = tch.normal(mean=tch.zeros([N,N]), std=1./np.sqrt(N) * tch.ones([N,N]))
@@ -100,7 +102,7 @@ def run_one_thread(out_dir, C, params, seed):
     thermal_move_acc = np.zeros(t_max)
     eigenvalues_acc = np.zeros((t_max, N))
 
-    # The eigenvalues we store are those of (mu*In - J), not J
+    # The eigenvalues we store are those of J, not (mu*In - J), is it better?
     energy, eigenvalues = compute_energy(J, C, params)
     energy_acc[0] = energy
     eigenvalues_acc[0] = eigenvalues
@@ -143,6 +145,15 @@ def run_one_thread(out_dir, C, params, seed):
             energy_acc[t] = energy_acc[t-1]
             eigenvalues_acc[t] = eigenvalues_acc[t-1]
 
+        # Introduce checkpoints !
+        if t % save_every == (save_every - 1):
+            np.save(out_dir+'energy_acc_ckpt', energy_acc)
+            plt.figure()
+            plt.plot(energy_acc[:t])
+            plt.savefig(out_dir+'energy_real_time.png')
+            plt.close()
+            np.save(out_dir+'eigenvalues_acc_ckpt', eigenvalues_acc)
+
     np.save(out_dir+'energy_acc', energy_acc)
     np.save(out_dir+'eigenvalues_acc', eigenvalues_acc)
 
@@ -151,6 +162,7 @@ def run_one_thread(out_dir, C, params, seed):
 def run_multi_threaded(params):
     # Determine the hash for that particular experiment
     hash = get_id_for_dict(params)
+    print('Exp with id {} and params {}'.format(hash, params))
     out_dir = 'out/raw/{}'.format(hash)
 
     # Just in case two params gave exactly the same hash
@@ -165,9 +177,15 @@ def run_multi_threaded(params):
     with open(out_dir + 'params', 'w') as outfile:
         json.dump(params, outfile)
 
+    if params['which_C'] == 'random':
+        model_to_fit = CenteredGM(params['n_neurons'])
+    elif params['which_C'] == 'bidiagonal':
+        raise NotImplementedError
+        # sigma = #0 on the diag, 1 on the two off-diags
+        model_to_fit = CenteredGM(params['n_neurons'], sigma=sigma)
 
-    model_to_fit = CenteredGM(params['n_neurons'])
     C_emp = tch.from_numpy(model_to_fit.get_empirical_C(n_samples=params['n_samples']).astype(np.float32))
+
     pool = ThreadPool(params['n_threads'])
 
     results = pool.starmap(run_one_thread, zip(
@@ -194,3 +212,4 @@ def run_multi_threaded(params):
 
 
 run_multi_threaded(params)
+post_run_parsing()

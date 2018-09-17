@@ -1,3 +1,6 @@
 .ipynb_checkpoints
-out
+out/*
+!out/processed/
+!out/processed/*
+!out/processed/**/*
 *.pyc
