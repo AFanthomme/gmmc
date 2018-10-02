@@ -1,9 +1,11 @@
 import numpy as np
 
+
 def generate_pd_matrix(dim):
     sigma = np.random.normal(np.zeros([dim,dim], dtype=np.float32), 1./np.sqrt(dim))
     sigma = (sigma + sigma.T) / np.sqrt(2)
     return sigma
+
 
 def normalize(sigma):
     dim = sigma.shape[0]
@@ -20,11 +22,12 @@ def normalize(sigma):
 
     return sigma
 
+
 class CenteredGM:
     def __init__(self, dim, sigma=None):
         self.dim = dim
         if sigma is not None:
-            self.sigma = sigma
+            self.sigma = normalize(sigma)
         else:
             self.sigma = normalize(generate_pd_matrix(self.dim))
 
@@ -36,7 +39,7 @@ class CenteredGM:
         # assert np.max(np.abs(np.diag(self.sigma))) < 10**(-6)
 
     def sample(self, n_samples):
-        return np.random.multivariate_normal(mean=np.zeros(self.dim), cov=self.sigma, size=n_samples)
+        return np.random.multivariate_normal(mean=np.zeros(self.dim), cov=self.sigma, size=int(n_samples))
 
     def get_empirical_C(self, n_samples):
         obs = self.sample(n_samples)
