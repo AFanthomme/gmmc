@@ -36,9 +36,12 @@ def run_multi_threaded(function, params):
         os.makedirs(out_dir)
         out_dir += '/'
     except FileExistsError:
-        out_dir += '_dup'
-        os.makedirs(out_dir)
-        out_dir += '/'
+        try:
+            out_dir += '_dup'
+            os.makedirs(out_dir)
+            out_dir += '/'
+        except FileExistsError:
+            return
 
     with open(out_dir + 'params', 'w') as outfile:
         json.dump(params, outfile)

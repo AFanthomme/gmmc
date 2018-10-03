@@ -8,6 +8,7 @@ from scipy.optimize import minimize_scalar as minimize
 from multiprocessing import Pool as ThreadPool
 from analysis import post_run_parsing
 from experiment_manager.launcher import explore_params, run_multi_threaded
+from experiment_manager.explorer import make_index
 import os
 
 params = {
@@ -16,7 +17,7 @@ params = {
         'alpha': 3.,
         'gamma': 1,
         'beta_normalized': 1.,
-        't_max': 4000,
+        't_max': 400000,
         'n_seeds': 8,
 
         # method used to select reference C
@@ -25,12 +26,14 @@ params = {
         # Multi-threading and IO params
         'n_threads': 8,
         'silent': False,
-        'test_every': 5,
+        'test_every': 100,
         }
 
 # Setting secondary parameters values
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
+
+params_to_vary = {'alpha' : [0.1, 1., 3., 10., 100.]}
 
 
 def compute_energy(J, C, params):
@@ -154,7 +157,7 @@ def run_one_thread(out_dir, params, seed):
             plt.savefig(out_dir+'test_energy_real_time.png')
             plt.close()
 
-            if idx % 100 == 99:
+            if idx % 50 == 49:
                 np.save(out_dir+'train_energy_acc_ckpt', train_energy_acc)
                 np.save(out_dir + 'test_energy_acc_ckpt', test_energy_acc)
                 np.save(out_dir+'eigenvalues_acc_ckpt', eigenvalues_acc)
@@ -166,9 +169,9 @@ def run_one_thread(out_dir, params, seed):
     return
 
 
+if __name__ == '__main__':
+    explore_params(run_one_thread, params, params_to_vary)
+    post_run_parsing()
 
-run_multi_threaded(run_one_thread, params)
 
 
-
-# post_run_parsing()
