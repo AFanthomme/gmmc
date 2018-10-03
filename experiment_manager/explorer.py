@@ -22,6 +22,7 @@ def make_index():
 
     database = pd.DataFrame.from_dict(dict_of_dicts)
     database.to_pickle('out/raw/parameters_database.pkl')
+    database.to_string(open('out/raw/parameters_database_human_readable.txt', mode='w+'))
     print('Current index table : {}'.format(database))
 
 def get_siblings(ref_hash, traversal_key):

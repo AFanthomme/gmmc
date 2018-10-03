@@ -33,7 +33,8 @@ params = {
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
-params_to_vary = {'alpha' : [0.1, 1., 3., 10., 100.]}
+params_to_vary = {'alpha' : [0.5, 2., 5., 7.]}
+    #{'alpha' : [0.1, 1., 3., 10., 100.]}
 
 
 def compute_energy(J, C, params):

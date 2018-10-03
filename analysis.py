@@ -37,6 +37,7 @@ def make_average_energy(folder):
 
 
     plt.figure()
+    plt.title(folder.split('/')[-1])
     plt.errorbar(np.arange(0, t_max, test_every), train_mean, yerr=train_std, label='Train')
     plt.errorbar(np.arange(0, t_max, test_every), test_mean, yerr=test_std, label='Test')
     plt.legend()
@@ -84,7 +85,7 @@ def make_eigenvalues_diffmap(folder):
 
     plt.figure()
     plt.imshow(diff_map.T, extent=[0, t_max, bounds[0], bounds[1]], aspect='auto')
-    plt.colorbar()
+    plt.title(folder.split('/')[-1])
     plt.savefig('{}/eigenvalues_diffmap.png'.format(folder))
     plt.close()
 
@@ -93,7 +94,7 @@ def make_eigenvalues_diffmap(folder):
 def parse_individual_subfolder(subfolder):
     # This function only acts as a container for other analysis routines (to keep things readable and modular)
 
-    # make_average_energy(subfolder)
+    make_average_energy(subfolder)
     make_eigenvalues_diffmap(subfolder)
 
 
