@@ -1,8 +1,7 @@
 import tqdm
 import numpy as np
 import torch as tch
-from gaussian_model import CenteredGM, generate_pd_matrix
-
+from gaussian_model import CenteredGM
 import matplotlib.pyplot as plt
 from scipy.optimize import minimize_scalar as minimize
 from multiprocessing import Pool as ThreadPool
@@ -14,10 +13,10 @@ import os
 params = {
         # Simulation parameters
         'n_neurons': 50,
-        'alpha': 3.,
+        'alpha': 10.,
         'gamma': 1,
         'beta_normalized': 1.,
-        't_max': 400000,
+        't_max': 200000,
         'n_seeds': 8,
 
         # method used to select reference C
@@ -33,8 +32,8 @@ params = {
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
-params_to_vary = {'alpha' : [0.5, 2., 5., 7.]}
-    #{'alpha' : [0.1, 1., 3., 10., 100.]}
+params_to_vary = {'gamma' : [10]}
+                #{'alpha' : [0.1, 1., 3., 10., 100., 0.5, 2., 5., 7.]}
 
 
 def compute_energy(J, C, params):
@@ -56,7 +55,7 @@ def compute_energy(J, C, params):
     mu_opt = minimize(surrogate, bounds=(spectrum.max().item(), spectrum.max().item() + 15), method='bounded').x
     likelihood_energy = 0.5 * alpha * (tch.trace(tch.mm(J,C)) / N + surrogate(mu_opt))
 
-    return l2_penalty + likelihood_energy, mu_opt - spectrum
+    return l2_penalty + likelihood_energy, spectrum, mu_opt
 
 
 
@@ -80,18 +79,27 @@ def run_one_thread(out_dir, params, seed):
     beta = params['beta']
     test_every = params['test_every']
 
-    if params['which_C'] == 'random':
-        model_to_fit = CenteredGM(params['n_neurons'])
-    elif params['which_C'] == 'bidiagonal':
-        sigma = np.zeros((N, N))
-        for i in range(N - 1):
-            sigma[i, i + 1] = 1
-            sigma[i + 1, i] = 1
-        model_to_fit = CenteredGM(N, sigma=sigma)
+    if params['which_C'] == 'null':
+        C_train = tch.from_numpy(np.zeros((N, N), dtype=np.float32))
+        C_test = tch.from_numpy(np.zeros((N, N), dtype=np.float32))
+    else:
+        if params['which_C'] == 'random':
+            model_to_fit = CenteredGM(params['n_neurons'])
+        elif params['which_C'] == 'bidiagonal':
+            sigma = np.zeros((N, N))
+            sigma[0, N - 1] = 1
+            sigma[N - 1, 0] = 1
+            for i in range(N - 1):
+                sigma[i, i + 1] = 1
+                sigma[i + 1, i] = 1
+            model_to_fit = CenteredGM(N, precision=sigma)
 
-    # Generate two empirical C to check overfitting
-    C_train = tch.from_numpy(model_to_fit.get_empirical_C(n_samples= alpha * N).astype(np.float32))
-    C_test = tch.from_numpy(model_to_fit.get_empirical_C(n_samples= alpha * N).astype(np.float32))
+        # Generate two empirical C to check overfitting
+        C_train = tch.from_numpy(model_to_fit.get_empirical_C(n_samples= alpha * N).astype(np.float32))
+        C_test = tch.from_numpy(model_to_fit.get_empirical_C(n_samples= alpha * N).astype(np.float32))
+
+
+
 
 
     # Initialization for J (sym, gaussian, zero diag)
@@ -104,25 +112,29 @@ def run_one_thread(out_dir, params, seed):
     train_energy_acc = np.zeros(t_max//test_every+1)
     test_energy_acc = np.zeros(t_max // test_every + 1)
     eigenvalues_acc = np.zeros((t_max//test_every+1, N))
+    mu_acc = np.zeros(t_max//test_every+1)
 
     # The eigenvalues we store are those of (mu*In - J) to get the "only positive evs"
-    energy, eigenvalues = compute_energy(J, C_train, params)
+    energy, eigenvalues, mu = compute_energy(J, C_train, params)
     train_energy_acc[0] = energy
     eigenvalues_acc[0] = eigenvalues
+    mu_acc[0] = mu
 
     current_energy = energy
 
     # MC loop
     for t in tqdm.tqdm(range(1, t_max)):
-        # Propose a change
-        i, j = np.random.randint(N, size=2)
+        # Propose a change, ensure not on diagonal
+        i, j = 0, 0
+        while i == j:
+            i, j = np.random.randint(N, size=2)
         epsilon = np.random.normal(scale=1./np.sqrt(N))
 
         J_prop = J.clone()
         J_prop[i, j] += epsilon
         J_prop[j, i] += epsilon
 
-        F_prop, spectrum = compute_energy(J_prop, C_train, params)
+        F_prop, spectrum, mu_opt = compute_energy(J_prop, C_train, params)
 
         if np.isnan(F_prop):
             print("Invalid move")
@@ -145,11 +157,19 @@ def run_one_thread(out_dir, params, seed):
         if t % test_every == (test_every - 1):
             idx = t // test_every + 1 # idx 0 is before starting
             eigenvalues_acc[idx] = spectrum
-
             train_energy_acc[idx] = current_energy
+            mu_acc[idx] = mu_opt
+
+            # print(spectrum.max().item(), spectrum.min().item(), mu_opt)
+
             plt.figure()
             plt.plot(train_energy_acc[:t])
             plt.savefig(out_dir+'train_energy_real_time.png')
+            plt.close()
+
+            plt.figure()
+            plt.plot(mu_acc[:t])
+            plt.savefig(out_dir+'mu_real_time.png')
             plt.close()
 
             test_energy_acc[idx] = compute_energy(J, C_test, params)[0]
@@ -162,10 +182,12 @@ def run_one_thread(out_dir, params, seed):
                 np.save(out_dir+'train_energy_acc_ckpt', train_energy_acc)
                 np.save(out_dir + 'test_energy_acc_ckpt', test_energy_acc)
                 np.save(out_dir+'eigenvalues_acc_ckpt', eigenvalues_acc)
+                np.save(out_dir + 'mu_acc_ckpt', mu_acc)
 
-    np.save(out_dir+'train_energy_acc', train_energy_acc)
-    np.save(out_dir+'test_energy_acc', test_energy_acc)
-    np.save(out_dir+'eigenvalues_acc', eigenvalues_acc)
+    np.save(out_dir + 'train_energy_acc', train_energy_acc)
+    np.save(out_dir + 'test_energy_acc', test_energy_acc)
+    np.save(out_dir + 'eigenvalues_acc', eigenvalues_acc)
+    np.save(out_dir + 'mu_acc', mu_acc)
 
     return
 

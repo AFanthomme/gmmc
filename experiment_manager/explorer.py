@@ -23,6 +23,7 @@ def make_index():
     database = pd.DataFrame.from_dict(dict_of_dicts)
     database.to_pickle('out/raw/parameters_database.pkl')
     database.to_string(open('out/raw/parameters_database_human_readable.txt', mode='w+'))
+    database.to_csv(open('out/raw/parameters_database.csv', mode='w+'))
     print('Current index table : {}'.format(database))
 
 def get_siblings(ref_hash, traversal_key):
@@ -31,6 +32,7 @@ def get_siblings(ref_hash, traversal_key):
     all_keys = list(db.keys())
     hashes = db.index.values.tolist()
     siblings = []
+    values = []
 
     with open('out/raw/{}/params'.format(ref_hash), 'r') as outfile:
         ref_params = json.load(outfile)
@@ -45,5 +47,9 @@ def get_siblings(ref_hash, traversal_key):
                 break
         if is_sibling:
             siblings.append(hash)
+            values.append(params[traversal_key])
+
+    print('To vary parameter {} in {}, visit {}'.format(traversal_key, values, siblings))
+
 
     return siblings

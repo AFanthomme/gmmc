@@ -1,45 +1,47 @@
 import numpy as np
 
 
-def generate_pd_matrix(dim):
+def generate_random_matrix(dim):
     sigma = np.random.normal(np.zeros([dim,dim], dtype=np.float32), 1./np.sqrt(dim))
     sigma = (sigma + sigma.T) / np.sqrt(2)
     return sigma
 
 
-def normalize(sigma):
-    dim = sigma.shape[0]
-    # Impose PD and mean of eigenvalues equal 1
+def normalize(precision_matrix):
+    # Impose PD and diagonal of inverse equal 1 -> covariance of all x equal to 1
+    # The diagonal of precision matrix is assumed 0
+    dim = precision_matrix.shape[0]
 
-    # Forces all diagonal elements to be the same
-    # That's the easiest way to ensure all ev > 0...
-    sigma -= np.diag(np.diag(sigma))
-    sigma += np.diag([dim for _ in range(dim)])
+    precision_matrix -= np.diag(np.diag(precision_matrix))
+    offset = np.abs(np.min(np.linalg.eig(precision_matrix)[0])) + 0.01
+    precision_matrix += np.diag([offset for _ in range(dim)])
+    precision_matrix *= np.diag(np.linalg.inv(precision_matrix))[0]
 
-    sigma *= dim / np.sum(np.linalg.eig(sigma)[0])
-    assert np.all(np.linalg.eig(sigma)[0] > 0.)
-    assert np.abs(np.sum(np.linalg.eig(sigma)[0]) - dim) < 0.05
-
-    return sigma
+    return precision_matrix
 
 
 class CenteredGM:
-    def __init__(self, dim, sigma=None):
+    def __init__(self, dim, precision=None):
         self.dim = dim
-        if sigma is not None:
-            self.sigma = normalize(sigma)
+        if precision is not None:
+            self.precision = normalize(precision)
         else:
-            self.sigma = normalize(generate_pd_matrix(self.dim))
+            self.precision = normalize(generate_random_matrix(self.dim))
 
         # Sanity checks before model build
-        # print(np.linalg.eig(self.sigma)[0])
-        assert np.all(np.linalg.eig(self.sigma)[0] > 0.)
-        assert self.sigma.shape == (self.dim, self.dim)
-        assert np.max(np.abs(self.sigma-self.sigma.T)) < 10**(-6)
-        # assert np.max(np.abs(np.diag(self.sigma))) < 10**(-6)
+
+        assert np.all(np.linalg.eig(self.precision )[0] > 0.)
+        assert self.precision.shape == (self.dim, self.dim)
+        assert np.max(np.abs(self.precision -self.precision.T)) < 1e-8
+        assert np.all(np.abs(np.diag(np.linalg.inv(self.precision)) - 1) < 1e-8)
+
+        print("precision matrix : ", self.precision, '\n\n\n\n\n')
+
+        self.covariance = np.linalg.inv(self.precision)
+        print("covariance matrix : ", self.covariance)
 
     def sample(self, n_samples):
-        return np.random.multivariate_normal(mean=np.zeros(self.dim), cov=self.sigma, size=int(n_samples))
+        return np.random.multivariate_normal(mean=np.zeros(self.dim), cov=self.covariance, size=int(n_samples))
 
     def get_empirical_C(self, n_samples):
         obs = self.sample(n_samples)
