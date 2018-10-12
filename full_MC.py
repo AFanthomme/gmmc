@@ -3,6 +3,7 @@ import numpy as np
 import torch as tch
 from gaussian_model import CenteredGM
 import matplotlib.pyplot as plt
+plt.switch_backend('agg')
 from scipy.optimize import minimize_scalar as minimize
 from multiprocessing import Pool as ThreadPool
 from analysis import post_run_parsing
@@ -14,9 +15,9 @@ params = {
         # Simulation parameters
         'n_neurons': 50,
         'alpha': 10.,
-        'gamma': 1,
+        'gamma': 40.,
         'beta_normalized': 1.,
-        't_max': 200000,
+        't_max': 100000,
         'n_seeds': 8,
 
         # method used to select reference C
@@ -32,8 +33,8 @@ params = {
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
-params_to_vary = {'gamma' : [10]}
-                #{'alpha' : [0.1, 1., 3., 10., 100., 0.5, 2., 5., 7.]}
+params_to_vary = {'alpha' : [0.1, 1., 3., 10., 100., 1000.]}
+
 
 
 def compute_energy(J, C, params):

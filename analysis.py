@@ -5,7 +5,7 @@ import os
 import json
 from experiment_manager.explorer import make_index, get_immediate_subdirectories
 
-_DEBUG = False
+_DEBUG = True
 
 def check_integrity(folder):
     try:
@@ -37,6 +37,12 @@ def make_average_energy(folder):
     test_mean = np.mean(test_energy_blob, axis=0)[1:]
     test_std = np.std(test_energy_blob, axis=0)[1:]
 
+    np.save('{}/E_train_avg.npy'.format(folder), train_mean)
+    np.save('{}/E_train_std.npy'.format(folder), train_std)
+
+    np.save('{}/E_test_avg.npy'.format(folder), test_mean)
+    np.save('{}/E_test_std.npy'.format(folder), test_std)
+
 
     plt.figure()
     plt.title(folder.split('/')[-1])
@@ -66,7 +72,8 @@ def make_average_mu(folder):
     mu_mean = np.mean(mu_blob, axis=0)[1:]
     mu_std = np.std(mu_blob, axis=0)[1:]
 
-
+    np.save('{}/mu_avg.npy'.format(folder), mu_mean)
+    np.save('{}/mu_std.npy'.format(folder), mu_std)
 
     plt.figure()
     plt.title(folder.split('/')[-1])

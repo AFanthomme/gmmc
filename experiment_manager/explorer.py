@@ -20,7 +20,7 @@ def make_index():
             params = json.load(outfile)
         dict_of_dicts[hash] = params
 
-    database = pd.DataFrame.from_dict(dict_of_dicts)
+    database = pd.DataFrame.from_dict(dict_of_dicts).transpose()
     database.to_pickle('out/raw/parameters_database.pkl')
     database.to_string(open('out/raw/parameters_database_human_readable.txt', mode='w+'))
     database.to_csv(open('out/raw/parameters_database.csv', mode='w+'))
@@ -42,14 +42,20 @@ def get_siblings(ref_hash, traversal_key):
         with open('out/raw/{}/params'.format(hash), 'r') as outfile:
             params = json.load(outfile)
         for key in all_keys:
-            if params[key] != ref_params[key] and key != traversal_key:
+            if params[key] != ref_params[key] and key not in [traversal_key, 't_max', 'n_threads', 'n_seeds', 'test_every']:
                 is_sibling = False
                 break
         if is_sibling:
             siblings.append(hash)
             values.append(params[traversal_key])
 
+    # Correctly sort the directories in increasing values of the param
+    sorter = np.argsort(values)
+
+    siblings = np.array(siblings)[sorter]
+    values = np.array(values)[sorter]
+
     print('To vary parameter {} in {}, visit {}'.format(traversal_key, values, siblings))
 
 
-    return siblings
+    return siblings, values
