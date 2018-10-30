@@ -14,14 +14,14 @@ import os
 params = {
         # Simulation parameters
         'n_neurons': 50,
-        'alpha': 10.,
-        'gamma': 40.,
+        'alpha': 0.,
+        'gamma': 5.,
         'beta_normalized': 1.,
         't_max': 100000,
         'n_seeds': 8,
 
         # method used to select reference C
-        'which_C': 'bidiagonal',
+        'which_C': 'null',
 
         # Multi-threading and IO params
         'n_threads': 8,
@@ -33,7 +33,7 @@ params = {
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
-params_to_vary = {'alpha' : [0.1, 1., 3., 10., 100., 1000.]}
+params_to_vary = {'alpha' : [10., 20., 100., 1000.]}
 
 
 
