@@ -21,7 +21,7 @@ def normalize(precision_matrix):
 
 
 class CenteredGM:
-    def __init__(self, dim, precision=None):
+    def __init__(self, dim, precision=None, silent=False):
         self.dim = dim
         if precision is not None:
             self.precision = normalize(precision)
@@ -35,10 +35,11 @@ class CenteredGM:
         assert np.max(np.abs(self.precision -self.precision.T)) < 1e-8
         assert np.all(np.abs(np.diag(np.linalg.inv(self.precision)) - 1) < 1e-8)
 
-        print("precision matrix : ", self.precision, '\n\n\n\n\n')
-
         self.covariance = np.linalg.inv(self.precision)
-        print("covariance matrix : ", self.covariance)
+
+        if not silent:
+            print("precision matrix : ", self.precision, '\n\n\n\n\n')
+            print("covariance matrix : ", self.covariance)
 
     def sample(self, n_samples):
         return np.random.multivariate_normal(mean=np.zeros(self.dim), cov=self.covariance, size=int(n_samples))

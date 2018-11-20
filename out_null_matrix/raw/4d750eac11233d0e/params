@@ -1,1 +1,0 @@
-{"n_neurons": 50, "alpha": 10.0, "gamma": 10, "beta_normalized": 1.0, "t_max": 200000, "n_seeds": 8, "which_C": "null", "n_threads": 8, "silent": false, "test_every": 100, "n_samples": 500, "beta": 2500.0}
