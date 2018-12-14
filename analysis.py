@@ -4,8 +4,6 @@ import pandas as pd
 import os
 import json
 from experiment_manager.explorer import make_index, get_immediate_subdirectories
-import sys
-plt.switch_backend('agg')
 
 _DEBUG = False
 
@@ -245,9 +243,10 @@ def post_run_parsing(dir = 'out'):
         parse_individual_subfolder(dir + '/raw/' + exp_dir)
 
 if __name__ == '__main__':
+    import sys
     try:
-        folder = sys.argv[1]
-        print('Treating folder {}'.format(folder))
-        post_run_parsing(folder)
-    except:
+        dir = sys.argv[1]
+        print(dir)
+        post_run_parsing(dir)
+    except IndexError:
         post_run_parsing()

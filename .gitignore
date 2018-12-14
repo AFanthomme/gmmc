@@ -5,3 +5,4 @@ out/*
 !out/processed/**/*
 *.pyc
 *.idea/*
+nohup.out

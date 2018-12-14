@@ -33,33 +33,31 @@ params = {
 params['n_samples'] = int(params['alpha'] * params['n_neurons'])
 params['beta'] = params['beta_normalized'] * params['n_neurons'] ** 2
 
-params_to_vary = {'alpha' : [1., 3., 10., 20., 100.],
-                    'gamma': [1e7, 1e-1, 3e-1, 7e-1, 1e-6, 1e6, 1e-7, 1e-5, 1e-4, 1e-3, 1e-2, 1., 1e1, 1e2, 1e3, 1e4, 1e5]}
+params_to_vary = {'alpha' : [1.5, 3., 10., 20.,],
+                    'gamma': [1e-5, 1e-4, 1e-3, 1e-2, 1., 1e1, 1e2, 1e3, 1e4, 1e5]}
 
-#[1e-5, 1e-4, 1e-3, 1e-2, 1., 1e1, 1e2, 1e3, 1e4, 1e5
-# 1e7, 1e-1, 3e-1, 7e-1, 1e-6, 1e6, 1e-7]
 
-def compute_energy(J, C, params):
-    N = params['n_neurons']
-    gamma = params['gamma']
-    alpha = params['alpha']
-
-    # J is the off-diagonal part
-    spectrum, _ = tch.symeig(J, eigenvectors=False)
-
-    # THE N² scaling will come from beta, so here everything should be order 1
-    # Penalty part is straightforward
-    l2_penalty = gamma * 0.25 * (spectrum**2).mean()
-
-    # Likelihood part requires some calculations because of the spherical constraint:
-    def surrogate(mu):
-        return  mu - tch.log(mu-spectrum).mean().item()
-
-    mu_opt = minimize(surrogate, bounds=(spectrum.max().item(), spectrum.max().item() + 15), method='bounded').x
-    logZ = surrogate(mu_opt)
-    likelihood_energy = 0.5 * alpha * (-tch.trace(tch.mm(J,C)) / N + logZ)
-
-    return l2_penalty + likelihood_energy, spectrum, mu_opt, logZ
+# def compute_energy(J, C, params):
+#     N = params['n_neurons']
+#     gamma = params['gamma']
+#     alpha = params['alpha']
+#
+#     # J is the off-diagonal part
+#     spectrum, _ = tch.symeig(J, eigenvectors=False)
+#
+#     # THE N² scaling will come from beta, so here everything should be order 1
+#     # Penalty part is straightforward
+#     l2_penalty = gamma * 0.25 * (spectrum**2).mean()
+#
+#     # Likelihood part requires some calculations because of the spherical constraint:
+#     def surrogate(mu):
+#         return  mu - tch.log(mu-spectrum).mean().item()
+#
+#     mu_opt = minimize(surrogate, bounds=(spectrum.max().item(), spectrum.max().item() + 15), method='bounded').x
+#     logZ = surrogate(mu_opt)
+#     likelihood_energy = 0.5 * alpha * (-tch.trace(tch.mm(J,C)) / N + logZ)
+#
+#     return l2_penalty + likelihood_energy, spectrum, mu_opt, logZ
 
 
 # Our Ltest is not that great -> could directly get the mean by computing J dot C_ref
@@ -67,7 +65,10 @@ def compute_likelihoods(gaussian_model, J, C, params):
     # Return the three likelihoods, logZ and Q2
     # All of them are at magnitude N/2, and without the substraction of logZ
 
-    spectrum, _ = tch.symeig(J, eigenvectors=False)
+    try:
+        spectrum, _ = tch.symeig(J, eigenvectors=False)
+    except:
+        pass
     C_true = tch.from_numpy(gaussian_model.covariance.astype(np.float32))
     N = params['n_neurons']
     gamma = params['gamma']
@@ -82,12 +83,14 @@ def compute_likelihoods(gaussian_model, J, C, params):
     Q2 = tch.sum(spectrum**2) / 2
 
     L_train = tch.trace(tch.mm(J,C)) / 2
-    L_test = tch.trace(tch.mm(J,C_true)) / 2
-
-    # TODO : modify to remove the J*
+    # Hre, need to do the change of basis for C_true
+    L_test = 0.5 * tch.trace(J.mm(C_true))
+    # old : L_test = tch.trace(tch.mm(J,C_true)) / 2
     L_gen = L_train - gamma / alpha * Q2
 
-    return L_train, L_test, L_gen, logZ, Q2
+    energy = (0.5 * gamma * Q2 - alpha * L_train + alpha * logZ) / N
+
+    return L_train, L_test, L_gen, logZ, Q2, mu_opt, energy
 
 
 def run_one_thread(out_dir, params, seed):
@@ -120,11 +123,11 @@ def run_one_thread(out_dir, params, seed):
             model_to_fit = CenteredGM(N, precision=np.zeros((N,N)))
         elif params['which_C'] == 'bidiagonal':
             sigma = np.zeros((N, N))
-            sigma[0, N - 1] = 1
-            sigma[N - 1, 0] = 1
+            sigma[0, N - 1] = 0.1
+            sigma[N - 1, 0] = 0.1
             for i in range(N - 1):
-                sigma[i, i + 1] = 1
-                sigma[i + 1, i] = 1
+                sigma[i, i + 1] = 0.1
+                sigma[i + 1, i] = 0.1
             model_to_fit = CenteredGM(N, precision=sigma)
 
         # Generate two empirical C to check overfitting
@@ -140,7 +143,7 @@ def run_one_thread(out_dir, params, seed):
     # Initialize the accumulators
     train_energy_acc = np.zeros(t_max//test_every+1)
     test_energy_acc = np.zeros(t_max // test_every + 1)
-    eigenvalues_acc = np.zeros((t_max//test_every+1, N))
+    # eigenvalues_acc = np.zeros((t_max//test_every+1, N))
     mu_acc = np.zeros(t_max//test_every+1)
 
     L_train_acc = np.zeros(t_max // test_every + 1)
@@ -150,18 +153,15 @@ def run_one_thread(out_dir, params, seed):
     Q2_acc = np.zeros(t_max // test_every + 1)
 
 
-    # The eigenvalues we store are those of (mu*In - J) to get the "only positive evs"
-    energy, eigenvalues, mu, logZ = compute_energy(J, C_train, params)
-    train_energy_acc[0] = energy
-    eigenvalues_acc[0] = eigenvalues
-    mu_acc[0] = mu
-
-    L_train, L_test, L_gen, logZ, Q2 = compute_likelihoods(model_to_fit, J, C_train, params)
+    L_train, L_test, L_gen, logZ, Q2, mu, energy = compute_likelihoods(model_to_fit, J, C_train, params)
     L_train_acc[0] = L_train
     L_test_acc[0] = L_test
     L_gen_acc[0] = L_gen
     logZ_acc[0] = logZ
     Q2_acc[0] = Q2
+    train_energy_acc[0] = energy
+    # eigenvalues_acc[0] = eigenvalues
+    mu_acc[0] = mu
 
 
     current_energy = energy
@@ -178,7 +178,9 @@ def run_one_thread(out_dir, params, seed):
         J_prop[i, j] += epsilon
         J_prop[j, i] += epsilon
 
-        F_prop, spectrum, mu_opt, _ = compute_energy(J_prop, C_train, params)
+
+        # F_prop, spectrum, mu_opt, _ = compute_energy(J_prop, C_train, params)
+        _, _, _, _, _, _, F_prop = compute_likelihoods(model_to_fit, J, C_train, params)
 
         if np.isnan(F_prop):
             print("Invalid move")
@@ -200,17 +202,18 @@ def run_one_thread(out_dir, params, seed):
         # Introduce checkpoints !
         if t % test_every == (test_every - 1):
             idx = t // test_every + 1 # idx 0 is before starting
-            eigenvalues_acc[idx] = spectrum
+            # eigenvalues_acc[idx] = spectrum
             train_energy_acc[idx] = current_energy
-            mu_acc[idx] = mu_opt
+            # mu_acc[idx] = mu_opt
 
-            L_train, L_test, L_gen, logZ, Q2 = compute_likelihoods(model_to_fit, J, C_train, params)
+            # L_train, L_test, L_gen, logZ, Q2 = compute_likelihoods(model_to_fit, J, C_train, params)
+            L_train, L_test, L_gen, logZ, Q2, mu, _ = compute_likelihoods(model_to_fit, J, C_train, params)
             L_train_acc[idx] = L_train
             L_test_acc[idx] = L_test
             L_gen_acc[idx] = L_gen
             logZ_acc[idx] = logZ
             Q2_acc[idx] = Q2
-
+            mu_acc[idx] = mu
 
             if idx % 10 == 0:
                 plt.figure()
@@ -228,16 +231,16 @@ def run_one_thread(out_dir, params, seed):
                 plt.savefig(out_dir+'logZ_real_time.png')
                 plt.close()
 
-                test_energy_acc[idx] = compute_energy(J, C_test, params)[0]
-                plt.figure()
-                plt.plot(train_energy_acc[:idx])
-                plt.savefig(out_dir+'test_energy_real_time.png')
-                plt.close()
+                # test_energy_acc[idx] = compute_energy(J, C_test, params)[0]
+                # plt.figure()
+                # plt.plot(train_energy_acc[:idx])
+                # plt.savefig(out_dir+'test_energy_real_time.png')
+                # plt.close()
 
             if idx % 50 == 49:
                 np.save(out_dir + 'train_energy_acc_ckpt', train_energy_acc)
-                np.save(out_dir + 'test_energy_acc_ckpt', test_energy_acc)
-                np.save(out_dir + 'eigenvalues_acc_ckpt', eigenvalues_acc)
+                # np.save(out_dir + 'test_energy_acc_ckpt', test_energy_acc)
+                # np.save(out_dir + 'eigenvalues_acc_ckpt', eigenvalues_acc)
                 np.save(out_dir + 'mu_acc_ckpt', mu_acc)
                 np.save(out_dir + 'L_train_acc_ckpt', L_train_acc)
                 np.save(out_dir + 'L_test_acc_ckpt', L_test_acc)
@@ -246,8 +249,8 @@ def run_one_thread(out_dir, params, seed):
                 np.save(out_dir + 'Q2_acc_ckpt', Q2_acc)
 
     np.save(out_dir + 'train_energy_acc', train_energy_acc)
-    np.save(out_dir + 'test_energy_acc', test_energy_acc)
-    np.save(out_dir + 'eigenvalues_acc', eigenvalues_acc)
+    # np.save(out_dir + 'test_energy_acc', test_energy_acc)
+    # np.save(out_dir + 'eigenvalues_acc', eigenvalues_acc)
     np.save(out_dir + 'L_train_acc', L_train_acc)
     np.save(out_dir + 'L_test_acc', L_test_acc)
     np.save(out_dir + 'L_gen_acc', L_gen_acc)
